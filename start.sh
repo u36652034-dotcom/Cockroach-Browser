@@ -20,6 +20,5 @@ export COCKROACH_BROWSER_PORT=43110
 npx cockroach-browser serve --host $COCKROACH_BROWSER_HOST --port $COCKROACH_BROWSER_PORT &
 
 # 6. Start the proxy IN THE FOREGROUND on the Hostless $PORT
-# This prevents "Exit code 0" and routes traffic properly.
 sleep 2
-node proxy.js
+node /home/browser/proxy.js
