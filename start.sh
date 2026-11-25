@@ -1,24 +1,24 @@
 #!/bin/bash
 set -e
 
-# 1. Start the virtual display (Xvfb)
+# 1. Virtual display
 Xvfb :99 -screen 0 1280x720x24 &
 export DISPLAY=:99
 
-# 2. Start a window manager
+# 2. Window manager
 fluxbox &
 
-# 3. Start x11vnc with auto auth detection
+# 3. VNC server (with auth guess to avoid MIT-MAGIC-COOKIE issues)
 x11vnc -display :99 -auth guess -nopw -listen 0.0.0.0 -forever &
 
-# 4. Start noVNC internally on port 6080
+# 4. noVNC websockify — serve static files under /vnc and WebSocket at /vnc/websockify
 websockify --web /usr/share/novnc 6080 localhost:5900 &
 
-# 5. Start Cockroach Browser internally on port 43110
+# 5. Cockroach Browser
 export COCKROACH_BROWSER_HOST=0.0.0.0
 export COCKROACH_BROWSER_PORT=43110
 npx cockroach-browser serve --host $COCKROACH_BROWSER_HOST --port $COCKROACH_BROWSER_PORT &
 
-# 6. Start the proxy in the foreground
+# 6. Proxy (foreground)
 sleep 2
 node /home/browser/proxy.js
