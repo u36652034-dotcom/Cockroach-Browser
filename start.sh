@@ -1,29 +1,20 @@
 #!/bin/bash
+# ... (Start Xvfb, fluxbox, x11vnc, noVNC as before)
 
-# 1. Start Xvfb
-Xvfb :99 -screen 0 1280x720x24 &
-export DISPLAY=:99
-
-# 2. Wait for Xvfb to be ready
-for i in $(seq 1 10); do
-    if xdpyinfo -display :99 >/dev/null 2>&1; then
-        break
-    fi
-    sleep 1
-done
-
-# 3. Window manager & VNC
-fluxbox &
-x11vnc -display :99 -nopw -listen 0.0.0.0 -forever &
-
-# 4. noVNC (serves on 6080)
-websockify --web /usr/share/novnc 6080 localhost:5900 &
-
-# 5. Cockroach Browser via mcp-proxy (serves on 43110)
+# 5. Start Cockroach Browser
 export HEADLESS=false
 export DISPLAY=:99
-mcp-proxy --port 43110 -- npx -y cockroach-browser > /home/browser/cockroach.log 2>&1 &
+export XDG_CONFIG_HOME=/tmp/.chromium
+export XDG_CACHE_HOME=/tmp/.chromium
+export CHROMIUM_ARGS="--no-sandbox --disable-gpu --disable-dev-shm-usage --disable-crash-reporter --user-data-dir=/tmp/chromium-data"
 
-# 6. Proxy (foreground)
+# Start the daemon directly (no mcp-proxy needed for the daemon itself)
+npx cockroach-browser serve --host 0.0.0.0 --port 43110 > /home/browser/cockroach.log 2>&1 &
+
+# 6. Start the Idle Killer Cron Job in the background
+# (We will add a simple loop or use a lightweight cron)
+bash /home/browser/idle-killer.sh &
+
+# 7. Start the Proxy (which now also handles session creation/killing)
 sleep 2
 node /home/browser/proxy.js
