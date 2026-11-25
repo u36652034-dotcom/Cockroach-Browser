@@ -25,8 +25,9 @@ ENV NODE_PATH=/usr/local/lib/node_modules
 COPY --chown=browser:browser start.sh /home/browser/start.sh
 COPY --chown=browser:browser proxy.js /home/browser/proxy.js
 
-# 6. Expose default port (Hostless overrides this)
-EXPOSE 3000
+# ... (previous lines remain the same)
+# 6. Expose the port Hostless expects
+EXPOSE 8000
 
 # 7. Start the container
 CMD ["bash", "/home/browser/start.sh"]
