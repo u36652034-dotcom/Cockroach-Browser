@@ -1,7 +1,0 @@
-{
-  "name": "cockroach-browser-hostless",
-  "version": "1.0.0",
-  "dependencies": {
-    "http-proxy": "^1.18.1"
-  }
-}
