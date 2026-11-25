@@ -1,0 +1,7 @@
+{
+  "name": "cockroach-browser-hostless",
+  "version": "1.0.0",
+  "dependencies": {
+    "cockroach-browser": "0.4.0"
+  }
+}
