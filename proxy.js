@@ -5,30 +5,21 @@ const proxy = httpProxy.createProxyServer({ ws: true });
 const PORT = process.env.PORT || 8000;
 
 http.createServer((req, res) => {
-    // 1. Health check
-    if (req.url === '/' || req.url === '/health') {
-        res.writeHead(200, { 'Content-Type': 'text/plain' });
-        res.end('OK');
-        return;
-    }
-
-    // 2. Forward to noVNC (Strip /vnc so it sees /vnc.html or /websockify)
-    if (req.url.startsWith('/vnc')) {
-        req.url = req.url.replace('/vnc', '') || '/';
-        proxy.web(req, res, { target: 'http://127.0.0.1:6080' });
-    } 
-    // 3. Forward to Cockroach MCP
-    else {
+    // Route /mcp to Cockroach Browser
+    if (req.url.startsWith('/mcp')) {
         req.url = req.url.replace('/mcp', '') || '/';
-        proxy.web(req, res, { target: 'http://127.0.0.1:43110' });
+        proxy.web(req, res, { target: 'http://127.0.0.1:43110', changeOrigin: true });
+    } 
+    // Route EVERYTHING ELSE to noVNC
+    else {
+        proxy.web(req, res, { target: 'http://127.0.0.1:6080', changeOrigin: true });
     }
 }).on('upgrade', (req, socket, head) => {
-    // 4. WebSocket upgrade for noVNC (Strip /vnc)
-    if (req.url.startsWith('/vnc')) {
-        req.url = req.url.replace('/vnc', '') || '/';
-        proxy.ws(req, socket, head, { target: 'ws://127.0.0.1:6080' });
-    } else {
+    if (req.url.startsWith('/mcp')) {
         socket.destroy();
+    } else {
+        // Forward WebSocket connections to noVNC
+        proxy.ws(req, socket, head, { target: 'ws://127.0.0.1:6080', changeOrigin: true });
     }
 }).listen(PORT, '0.0.0.0', () => {
     console.log(`Proxy listening on port ${PORT}`);
