@@ -2,8 +2,8 @@ FROM node:22-bookworm-slim
 
 # 1. System deps (root). fonts-liberation: otherwise web pages render with no text.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    chromium xvfb x11vnc fluxbox novnc websockify \
-    fonts-liberation ca-certificates curl jq openssl procps \
+    chromium xvfb x11vnc novnc websockify \
+    fonts-liberation ca-certificates openssl \
     && rm -rf /var/lib/apt/lists/*
 
 # 2. Node tools (root). Pinned to the version the CLI flags in start.sh were checked against.
