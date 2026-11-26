@@ -30,6 +30,8 @@ const TOKEN_FILE =
   process.env.COCKROACH_TOKEN_FILE || path.join(os.homedir(), '.cockroach-browser', 'auth-token');
 
 const proxy = httpProxy.createProxyServer({ ws: true });
+proxy.on('open', () => console.log('[gateway] websocket to noVNC opened'));
+proxy.on('close', () => console.log('[gateway] websocket closed'));
 
 proxy.on('error', (err, req, res) => {
   console.error(`[gateway] upstream error for ${req && req.url}: ${err.message}`);
@@ -59,14 +61,18 @@ function authorized(req) {
 }
 
 // HTTP Basic login for the desktop (page + websocket). No 8-char VNC limit, no x11vnc lockouts.
+const SESSION = crypto.createHash('sha256').update(`${BASIC_USER}:${BASIC_PASS}:session-v1`).digest('hex');
+const COOKIE = `bsess=${SESSION}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=86400`;
+function safeEq(x, y) {
+  const a = Buffer.from(String(x)), b = Buffer.from(String(y));
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+// Accepts either the Basic header or the session cookie (cookies are always sent on websocket handshakes).
 function basicOk(req) {
   if (!BASIC_PASS) return false; // fail closed
-  const h = req.headers.authorization || '';
-  if (!h.startsWith('Basic ')) return false;
-  const given = Buffer.from(h.slice(6), 'base64').toString('utf8');
-  const a = Buffer.from(given);
-  const b = Buffer.from(`${BASIC_USER}:${BASIC_PASS}`);
-  return a.length === b.length && crypto.timingSafeEqual(a, b);
+  const m = /(?:^|;\s*)bsess=([0-9a-f]{64})/.exec(req.headers.cookie || '');
+  if (m && safeEq(m[1], SESSION)) return 'cookie';
+  return false;
 }
 
 function json(res, code, obj) {
@@ -111,6 +117,29 @@ const server = http.createServer(async (req, res) => {
     return res.end('ok\n');
   }
 
+  if (pathname === '/login') {
+    const page = (msg) => `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Login</title>
+<body style="font-family:sans-serif;background:#222;color:#eee;display:flex;height:100vh;align-items:center;justify-content:center;margin:0">
+<form method="POST" action="/login" style="display:flex;flex-direction:column;gap:12px;width:260px">
+<b style="font-size:20px">Browser login</b>${msg ? `<span style="color:#f77">${msg}</span>` : ''}
+<input type="password" name="password" placeholder="Password" autofocus style="padding:10px;font-size:16px">
+<button style="padding:10px;font-size:16px">Sign in</button></form></body>`;
+    if (req.method === 'POST') {
+      let pw = '';
+      try { pw = new URLSearchParams(await readBody(req, 4096)).get('password') || ''; } catch (e) { /* ignore */ }
+      if (BASIC_PASS && safeEq(pw, BASIC_PASS)) {
+        res.writeHead(302, { 'Set-Cookie': COOKIE, Location: '/vnc.html?autoconnect=true&resize=scale&path=websockify&quality=4&compression=7' });
+        return res.end();
+      }
+      console.log('[gateway] failed login attempt');
+      await new Promise((r) => setTimeout(r, 1000)); // slow down guessing
+      res.writeHead(401, { 'Content-Type': 'text/html; charset=utf-8' });
+      return res.end(page('Wrong password'));
+    }
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+    return res.end(page(''));
+  }
+
   if (pathname === '/') {
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
     return res.end(landing);
@@ -151,9 +180,13 @@ const server = http.createServer(async (req, res) => {
 
   // Default: noVNC static files (vnc.html, app/*, core/*, vendor/*, package.json, ...)
   if (!basicOk(req)) {
-    res.writeHead(401, { 'WWW-Authenticate': 'Basic realm="Browser", charset="UTF-8"', 'Content-Type': 'text/plain' });
-    return res.end('Login required\n');
+    res.writeHead(302, { Location: '/login' });
+    return res.end();
   }
+  if (pathname.startsWith('/websockify')) {
+    console.log(`[gateway] PLAIN HTTP ${req.method} ${pathname} (no websocket upgrade seen) upgrade-hdr=${req.headers.upgrade || '-'} connection-hdr=${req.headers.connection || '-'}`);
+  }
+  res.setHeader('Set-Cookie', COOKIE);
   return proxy.web(req, res, { target: NOVNC });
 });
 
@@ -161,7 +194,9 @@ server.on('upgrade', (req, socket, head) => {
   socket.on('error', (err) => console.error('[gateway] socket error:', err.message));
   const p = (req.url || '').split('?')[0];
   if (p.startsWith('/websockify')) {
-    if (!basicOk(req)) { socket.end('HTTP/1.1 401 Unauthorized\r\nWWW-Authenticate: Basic realm="Browser"\r\nContent-Length: 0\r\n\r\n'); return; }
+    const how = basicOk(req);
+    console.log(`[gateway] websocket upgrade ${p} auth=${how || 'REJECTED'} origin=${req.headers.origin || '-'}`);
+    if (!how) { socket.end('HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\n\r\n'); return; }
     return proxy.ws(req, socket, head, { target: NOVNC_WS });
   }
   if (p === '/mcp' || p.startsWith('/mcp/') || p === '/sse') return proxy.ws(req, socket, head, { target: MCP_WS });
