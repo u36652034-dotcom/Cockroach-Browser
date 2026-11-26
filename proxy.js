@@ -23,6 +23,8 @@ const NOVNC_WS = 'ws://127.0.0.1:6080';
 const MCP = 'http://127.0.0.1:43111';
 const MCP_WS = 'ws://127.0.0.1:43111';
 const API_KEY = process.env.MCP_API_KEY || '';
+const BASIC_USER = process.env.BASIC_USER || 'admin';
+const BASIC_PASS = process.env.VNC_PASSWORD || '';
 const COCKROACH_URL = process.env.COCKROACH_BROWSER_URL || 'http://127.0.0.1:43110';
 const TOKEN_FILE =
   process.env.COCKROACH_TOKEN_FILE || path.join(os.homedir(), '.cockroach-browser', 'auth-token');
@@ -56,6 +58,17 @@ function authorized(req) {
   return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
 
+// HTTP Basic login for the desktop (page + websocket). No 8-char VNC limit, no x11vnc lockouts.
+function basicOk(req) {
+  if (!BASIC_PASS) return false; // fail closed
+  const h = req.headers.authorization || '';
+  if (!h.startsWith('Basic ')) return false;
+  const given = Buffer.from(h.slice(6), 'base64').toString('utf8');
+  const a = Buffer.from(given);
+  const b = Buffer.from(`${BASIC_USER}:${BASIC_PASS}`);
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+
 function json(res, code, obj) {
   res.writeHead(code, { 'Content-Type': 'application/json' });
   res.end(JSON.stringify(obj));
@@ -82,8 +95,8 @@ function cli(args, cb) {
 }
 
 const landing = `<!doctype html><meta charset="utf-8"><title>Cockroach Browser</title>
-<meta http-equiv="refresh" content="0; url=/vnc.html?autoconnect=true&resize=scale&path=websockify">
-<a href="/vnc.html?autoconnect=true&resize=scale&path=websockify">Open the browser (noVNC)</a>`;
+<meta http-equiv="refresh" content="0; url=/vnc.html?autoconnect=true&resize=scale&path=websockify&quality=4&compression=7">
+<a href="/vnc.html?autoconnect=true&resize=scale&path=websockify&quality=4&compression=7">Open the browser (noVNC)</a>`;
 
 const server = http.createServer(async (req, res) => {
   const url = req.url || '/';
@@ -137,13 +150,20 @@ const server = http.createServer(async (req, res) => {
   if (pathname.startsWith('/api/')) return json(res, 404, { error: 'unknown api route' });
 
   // Default: noVNC static files (vnc.html, app/*, core/*, vendor/*, package.json, ...)
+  if (!basicOk(req)) {
+    res.writeHead(401, { 'WWW-Authenticate': 'Basic realm="Browser", charset="UTF-8"', 'Content-Type': 'text/plain' });
+    return res.end('Login required\n');
+  }
   return proxy.web(req, res, { target: NOVNC });
 });
 
 server.on('upgrade', (req, socket, head) => {
   socket.on('error', (err) => console.error('[gateway] socket error:', err.message));
   const p = (req.url || '').split('?')[0];
-  if (p.startsWith('/websockify')) return proxy.ws(req, socket, head, { target: NOVNC_WS });
+  if (p.startsWith('/websockify')) {
+    if (!basicOk(req)) { socket.end('HTTP/1.1 401 Unauthorized\r\nWWW-Authenticate: Basic realm="Browser"\r\nContent-Length: 0\r\n\r\n'); return; }
+    return proxy.ws(req, socket, head, { target: NOVNC_WS });
+  }
   if (p === '/mcp' || p.startsWith('/mcp/') || p === '/sse') return proxy.ws(req, socket, head, { target: MCP_WS });
   socket.destroy();
 });
