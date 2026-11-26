@@ -19,8 +19,10 @@ const crypto = require('crypto');
 const { execFile } = require('child_process');
 const httpProxy = require('http-proxy');
 const { WebSocketServer } = require('ws');
+const diag = require('./diag.js');
+diag.captureConsole(); // keeps the gateway's own log lines for /diag
 
-const VERSION = 6;
+const VERSION = 8;
 const PORT = parseInt(process.env.PORT || '8000', 10);
 const VNC_PORT = 5900;
 const NOVNC_ROOT = path.resolve(process.env.NOVNC_ROOT || '/usr/share/novnc');
@@ -151,8 +153,7 @@ const server = http.createServer(async (req, res) => {
   if (pathname === '/healthz') {
     if (url.includes('deep=1')) {
       const [vnc, daemon, mcp] = await Promise.all([VNC_PORT, 43110, 43111].map(probe));
-      const probe43110 = daemon;
-      return json(res, 200, { gateway: VERSION, x11vnc: vnc, cockroachDaemon: daemon, mcpProxy: mcp, novncRoot: fs.existsSync(path.join(NOVNC_ROOT, 'vnc.html')), chromiumPath: process.env.CHROMIUM_PATH || null, cockroachEnabled: probe43110 });
+      return json(res, 200, { gateway: VERSION, x11vnc: vnc, cockroachDaemon: daemon, mcpProxy: mcp, novncRoot: fs.existsSync(path.join(NOVNC_ROOT, 'vnc.html')), chromiumPath: process.env.CHROMIUM_PATH || null, enableCockroachEnv: process.env.ENABLE_COCKROACH || null, cockroachCli: fs.existsSync(COCKROACH_CLI), tokenFile: fs.existsSync(TOKEN_FILE) });
     }
     res.writeHead(200, { 'Content-Type': 'text/plain' });
     return res.end('ok\n');
@@ -174,6 +175,14 @@ const server = http.createServer(async (req, res) => {
     }
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
     return res.end(loginPage(''));
+  }
+
+  if (pathname === '/diag') {
+    if (!loggedIn(req) && !apiAuthorized(req)) { res.writeHead(401, { 'Content-Type': 'text/plain' }); return res.end('Log in at /login first, or send X-API-Key.\n'); }
+    let text;
+    try { text = await diag.report(); } catch (e) { text = `diag failed: ${e.stack || e}`; }
+    res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' });
+    return res.end(text + '\n');
   }
 
   if (pathname === '/wstest') { res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }); return res.end(wsTestPage); }
