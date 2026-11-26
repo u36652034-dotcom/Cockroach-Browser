@@ -3,6 +3,8 @@
 set -u
 
 export PORT="${PORT:-8000}"
+# stale cockroach env vars from the hosting dashboard would override our token file; drop them (mcp gets its own below)
+for v in $(env | grep -o '^COCKROACH_BROWSER_[A-Z_]*'); do echo "[start] ignoring env var $v from hosting settings"; unset "$v"; done
 export MALLOC_ARENA_MAX=2   # glibc: fewer per-thread arenas = noticeably lower RSS
 export DISPLAY=:99
 export HOME=/home/browser
