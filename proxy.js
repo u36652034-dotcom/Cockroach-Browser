@@ -22,7 +22,7 @@ const { WebSocketServer } = require('ws');
 const diag = require('./diag.js');
 diag.captureConsole(); // keeps the gateway's own log lines for /diag
 
-const VERSION = 8;
+const VERSION = 9;
 const PORT = parseInt(process.env.PORT || '8000', 10);
 const VNC_PORT = 5900;
 const NOVNC_ROOT = path.resolve(process.env.NOVNC_ROOT || '/usr/share/novnc');
@@ -48,8 +48,16 @@ function loggedIn(req) {
   const m = /(?:^|;\s*)bsess=([0-9a-f]{64})/.exec(req.headers.cookie || '');
   return Boolean(m && safeEq(m[1], SESSION));
 }
+const sha8 = (s) => crypto.createHash('sha256').update(String(s)).digest('hex').slice(0, 8);
+let lastKeyLog = 0;
 function apiAuthorized(req) {
-  return Boolean(API_KEY) && safeEq(req.headers['x-api-key'] || '', API_KEY);
+  const given = req.headers['x-api-key'] || '';
+  const ok = Boolean(API_KEY) && safeEq(given, API_KEY);
+  if (!ok && Date.now() - lastKeyLog > 5000) { // lengths + hash prefixes only, never the keys
+    lastKeyLog = Date.now();
+    console.log(`[gateway] API key rejected: sent len=${String(given).length} sha256[:8]=${given ? sha8(given) : '-'} | server expects len=${API_KEY.length} sha256[:8]=${API_KEY ? sha8(API_KEY) : '-'}`);
+  }
+  return ok;
 }
 
 // ---------- helpers ----------
@@ -83,8 +91,12 @@ function readBody(req, limit = 64 * 1024) {
   });
 }
 function cli(args, cb) {
+  // The CLI prefers COCKROACH_BROWSER_TOKEN / _URL env vars over the flags. A stale one set in the hosting
+  // dashboard would silently override our token file, so strip them for these calls.
+  const env = { ...process.env };
+  for (const k of Object.keys(env)) if (k.startsWith('COCKROACH_BROWSER_')) delete env[k];
   execFile('node', [COCKROACH_CLI, ...args, '--url', COCKROACH_URL, '--token-file', TOKEN_FILE],
-    { timeout: 60000, maxBuffer: 4 * 1024 * 1024 }, cb);
+    { timeout: 60000, maxBuffer: 4 * 1024 * 1024, env }, cb);
 }
 
 const MIME = {
