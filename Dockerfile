@@ -2,12 +2,12 @@ FROM node:22-bookworm-slim
 
 # 1. System deps (root). fonts-liberation: otherwise web pages render with no text.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    chromium xvfb x11vnc novnc websockify \
+    chromium xvfb x11vnc novnc \
     fonts-liberation ca-certificates openssl \
     && rm -rf /var/lib/apt/lists/*
 
 # 2. Node tools (root). Pinned to the version the CLI flags in start.sh were checked against.
-RUN npm install -g cockroach-browser@0.4.1 http-proxy mcp-proxy && npm cache clean --force
+RUN npm install -g cockroach-browser@0.4.1 http-proxy ws mcp-proxy && npm cache clean --force
 
 ENV NODE_PATH=/usr/local/lib/node_modules \
     XDG_CONFIG_HOME=/tmp/.chromium \
