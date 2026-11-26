@@ -16,7 +16,8 @@ const { execFile } = require('child_process');
 const LOG_DIR = process.env.LOG_DIR || '/tmp/logs';
 const HOME = process.env.HOME || os.homedir();
 const CLI = process.env.COCKROACH_CLI || '/usr/local/lib/node_modules/cockroach-browser/dist/cli.js';
-const TOKEN_FILE = process.env.COCKROACH_TOKEN_FILE || path.join(HOME, '.cockroach-browser', 'auth-token');
+const ROOT = process.env.COCKROACH_ROOT || path.join(HOME, '.cockroach-browser');
+const TOKEN_FILE = process.env.COCKROACH_TOKEN_FILE || path.join(ROOT, 'auth-token');
 
 // ---- in-memory ring of the gateway's own console output (only filled when used inside the gateway)
 const ring = [];
@@ -138,7 +139,7 @@ async function report() {
   const cg = cgroup();
   const files = {
     cli: finfo(CLI), token: finfo(TOKEN_FILE), chromium: finfo(env.CHROMIUM_PATH || '/usr/bin/chromium'),
-    novnc: finfo('/usr/share/novnc/vnc.html'), xsock: finfo('/tmp/.X11-unix/X99'), dataDir: finfo(path.join(HOME, '.cockroach-browser'))
+    novnc: finfo('/usr/share/novnc/vnc.html'), xsock: finfo('/tmp/.X11-unix/X99'), dataDir: finfo(ROOT)
   };
 
   add(`DIAG REPORT  ${new Date().toISOString()}  (uptime of this process ${Math.round(process.uptime())}s, host uptime ${Math.round(os.uptime())}s)`);
@@ -159,7 +160,21 @@ async function report() {
 
   H('FILES');
   Object.values(files).forEach((f) => add(f));
-  try { add(`~/.cockroach-browser contents: ${fs.readdirSync(path.join(HOME, '.cockroach-browser')).join(', ') || '(empty)'}`); } catch (e) { add(`~/.cockroach-browser contents: unreadable (${e.code})`); }
+  try { add(`${ROOT} contents: ${fs.readdirSync(ROOT).join(', ') || '(empty)'}`); } catch (e) { add(`${ROOT} contents: unreadable (${e.code})`); }
+
+  H('WRITE TESTS (can this user create nested folders + files here?)');
+  const wt = (dir) => {
+    try {
+      const base = path.join(dir, '.diag-probe');
+      fs.mkdirSync(path.join(base, 'sub'), { recursive: true });
+      fs.writeFileSync(path.join(base, 'sub', 'x'), '1');
+      fs.rmSync(base, { recursive: true, force: true });
+      return 'OK';
+    } catch (e) { return `FAILED ${e.code}: ${e.message}`; }
+  };
+  const wdirs = [...new Set([ROOT, path.join(HOME, '.cockroach-browser'), HOME, '/tmp'])].filter((d2) => fs.existsSync(d2));
+  const writes = {};
+  wdirs.forEach((d2) => { writes[d2] = wt(d2); add(`${d2}: ${writes[d2]}`); });
 
   H('LISTENING TCP PORTS (from /proc/net/tcp)');
   add(`${listening.join(', ') || '(none)'}`);
@@ -218,6 +233,7 @@ async function report() {
   if (cg.events && cg.events.oom_kill > 0) findings.push(`OUT OF MEMORY: the kernel has killed ${cg.events.oom_kill} process(es) in this container. See PROCESSES for what is using RAM.`);
   if (Number.isFinite(+cg.memCur) && Number.isFinite(+cg.memMax) && +cg.memCur > 0.85 * +cg.memMax) findings.push(`Memory is above 85% of the limit (${mb(cg.memCur)} of ${mb(cg.memMax)}).`);
   if (cg.cpu.nr_periods > 100 && cg.cpu.nr_throttled / cg.cpu.nr_periods > 0.3) findings.push(`CPU is being throttled in ${Math.round(100 * cg.cpu.nr_throttled / cg.cpu.nr_periods)}% of periods (0.5 vCPU limit). Things will be slow, not broken.`);
+  Object.entries(writes).forEach(([d2, r]) => { if (r !== 'OK') findings.push(`Cannot create folders/files in ${d2} (${r}). Anything that needs to write there will crash.`); });
   if (!fs.existsSync('/tmp/.X11-unix/X99')) findings.push('Xvfb display :99 is missing, so nothing graphical can run. Check xvfb.log.');
   if (!vncUp) findings.push('x11vnc is not listening on 5900, so the desktop page cannot work. Check x11vnc.log.');
   if (!has(/chromium/)) findings.push('No chromium process is running (the restart loop in start.sh should bring it back; check chromium.log).');
@@ -229,7 +245,7 @@ async function report() {
     if (!fs.existsSync(CLI)) findings.push(`Cockroach CLI file not found at ${CLI}. The npm install -g step did not put it there.`);
     else if (!cliV.out) findings.push(`Running "node ${CLI} version" printed nothing (code ${cliV.code}, err=${JSON.stringify(cliV.err)}). The package is broken or the node version is wrong.`);
     if (!tokenRaw) {
-      if (!has(/cli\.js/) || !has(/ serve /)) findings.push('The cockroach daemon process is not running and never wrote its token. ' + (cl && cl.text ? 'Its log (above, cockroach.log) holds the crash reason.' : 'cockroach.log is empty, so it exited without output or was never started. Check the [start] lines at the top of the hostless log for "cockroach".'));
+      if (!has(/cli\.js/) || !has(/ serve /)) findings.push('The cockroach daemon process is not running and never wrote its token. ' + (cl && cl.text ? `Its log says: ${JSON.stringify(cl.text.split('\n').slice(-2).join(' | ').slice(0, 300))}` : 'cockroach.log is empty, so it exited without output or was never started. Check the [start] lines at the top of the hostless log for "cockroach".'));
       else findings.push('The daemon process exists but has not written the token yet; it may still be starting or is stuck. Compare with cockroach.log.');
     } else if (!daemonUp) {
       findings.push('Token exists but nothing listens on 43110: the daemon started once and then died. Read cockroach.log for the reason (OOM kills are shown under MEMORY).');
