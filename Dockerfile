@@ -7,9 +7,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # 2. Node tools (root). Pinned to the version the CLI flags in start.sh were checked against.
-RUN npm install -g cockroach-browser@0.4.1 http-proxy ws mcp-proxy && npm cache clean --force
+RUN npm install -g cockroach-browser@0.4.1 http-proxy ws mcp-proxy && npm cache clean --force \
+    && node /usr/local/lib/node_modules/cockroach-browser/dist/cli.js version
 
 ENV NODE_PATH=/usr/local/lib/node_modules \
+    COCKROACH_CLI=/usr/local/lib/node_modules/cockroach-browser/dist/cli.js \
     XDG_CONFIG_HOME=/tmp/.chromium \
     XDG_CACHE_HOME=/tmp/.chromium
 
