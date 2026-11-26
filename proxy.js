@@ -20,7 +20,7 @@ const { execFile } = require('child_process');
 const httpProxy = require('http-proxy');
 const { WebSocketServer } = require('ws');
 
-const VERSION = 4;
+const VERSION = 5;
 const PORT = parseInt(process.env.PORT || '8000', 10);
 const VNC_PORT = 5900;
 const NOVNC_ROOT = path.resolve(process.env.NOVNC_ROOT || '/usr/share/novnc');
@@ -150,7 +150,8 @@ const server = http.createServer(async (req, res) => {
   if (pathname === '/healthz') {
     if (url.includes('deep=1')) {
       const [vnc, daemon, mcp] = await Promise.all([VNC_PORT, 43110, 43111].map(probe));
-      return json(res, 200, { gateway: VERSION, x11vnc: vnc, cockroachDaemon: daemon, mcpProxy: mcp, novncRoot: fs.existsSync(path.join(NOVNC_ROOT, 'vnc.html')) });
+      const probe43110 = daemon;
+      return json(res, 200, { gateway: VERSION, x11vnc: vnc, cockroachDaemon: daemon, mcpProxy: mcp, novncRoot: fs.existsSync(path.join(NOVNC_ROOT, 'vnc.html')), chromiumPath: process.env.CHROMIUM_PATH || null, cockroachEnabled: probe43110 });
     }
     res.writeHead(200, { 'Content-Type': 'text/plain' });
     return res.end('ok\n');
