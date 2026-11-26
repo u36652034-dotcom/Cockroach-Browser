@@ -10,6 +10,8 @@ SCREEN="${SCREEN:-1280x720x16}"            # 16-bit colour: less RAM and less VN
 START_URL="${START_URL:-about:blank}"
 ENABLE_COCKROACH="${ENABLE_COCKROACH:-0}"  # 1 = also run cockroach daemon + MCP (~+300MB)
 TOKEN_FILE="$HOME/.cockroach-browser/auth-token"
+# NOTE: the package does nothing when started through its bin symlink, so always run it via node + real path
+export COCKROACH_CLI="${COCKROACH_CLI:-$(npm root -g)/cockroach-browser/dist/cli.js}"
 export COCKROACH_TOKEN_FILE="$TOKEN_FILE"
 
 log() { echo "[start] $*"; }
@@ -64,11 +66,11 @@ mkdir -p /tmp/chromium-data /tmp/chromium-cache
 if [ "$ENABLE_COCKROACH" = "1" ]; then
   export NODE_OPTIONS="--max-old-space-size=96"
   mkdir -p "$(dirname "$TOKEN_FILE")"
-  run cockroach cockroach-browser serve --host 127.0.0.1 --port 43110 --token-file "$TOKEN_FILE" --allow-session-host-config
+  run cockroach node "$COCKROACH_CLI" serve --host 127.0.0.1 --port 43110 --token-file "$TOKEN_FILE" --allow-session-host-config
   for i in $(seq 1 60); do [ -s "$TOKEN_FILE" ] && break; sleep 1; done
   if [ -s "$TOKEN_FILE" ]; then
     run mcp env COCKROACH_BROWSER_URL=http://127.0.0.1:43110 COCKROACH_BROWSER_TOKEN="$(tr -d '\n' < "$TOKEN_FILE")" \
-      mcp-proxy --host 127.0.0.1 --port 43111 --apiKey "$MCP_API_KEY" -- cockroach-browser mcp
+      mcp-proxy --host 127.0.0.1 --port 43111 --apiKey "$MCP_API_KEY" -- node "$COCKROACH_CLI" mcp
   else
     log "ERROR: cockroach daemon never wrote $TOKEN_FILE (see [cockroach] lines)"
   fi
