@@ -3,6 +3,7 @@
 set -u
 
 export PORT="${PORT:-8000}"
+export MALLOC_ARENA_MAX=2   # glibc: fewer per-thread arenas = noticeably lower RSS
 export DISPLAY=:99
 export HOME=/home/browser
 SCREEN="${SCREEN:-1280x720x16}"            # 16-bit colour: less RAM and less VNC traffic
@@ -24,20 +25,19 @@ if [ -z "${MCP_API_KEY:-}" ];  then MCP_API_KEY="$(openssl rand -hex 16)"; log "
 export VNC_PASSWORD MCP_API_KEY
 
 # ---- 1. gateway first so the health check passes immediately
-node --max-old-space-size=64 /home/browser/proxy.js &
+node --max-old-space-size=48 /home/browser/proxy.js &
 PROXY_PID=$!
 
 # ---- 2. virtual display (no window manager: one Chromium window fills the screen)
-Xvfb :99 -screen 0 "$SCREEN" -nolisten tcp -ac 2>&1 | sed -u 's/^/[xvfb] /' &
+Xvfb :99 -screen 0 "$SCREEN" -nolisten tcp -noreset -ac 2>&1 | sed -u 's/^/[xvfb] /' &
 for i in $(seq 1 30); do [ -S /tmp/.X11-unix/X99 ] && break; sleep 0.5; done
 [ -S /tmp/.X11-unix/X99 ] && log "X display ready" || log "ERROR: Xvfb did not start"
 
 # ---- 3. VNC: loopback only, no VNC password (the gateway does the login)
 run x11vnc x11vnc -display :99 -rfbport 5900 -localhost -nopw -forever -shared -noxdamage -nowf -noscr -wait 40 -defer 40 -quiet
 
-# ---- 4. noVNC web client (loopback only)
+# ---- 4. noVNC files are served by the gateway itself (no python websockify process)
 [ -f /usr/share/novnc/vnc.html ] || log "WARNING: /usr/share/novnc/vnc.html missing: $(ls /usr/share/novnc 2>&1 | tr '\n' ' ')"
-run websockify websockify --web /usr/share/novnc 127.0.0.1:6080 127.0.0.1:5900
 
 # ---- 5. Chromium, low-memory flags, restarts if it dies
 mkdir -p /tmp/chromium-data /tmp/chromium-cache
@@ -46,7 +46,7 @@ mkdir -p /tmp/chromium-data /tmp/chromium-cache
     chromium \
       --no-sandbox --test-type --no-first-run --no-default-browser-check --disable-crash-reporter \
       --disable-gpu --disable-vulkan --disable-software-rasterizer --disable-dev-shm-usage \
-      --enable-low-end-device-mode --renderer-process-limit=2 \
+      --no-zygote --enable-low-end-device-mode --disable-breakpad --disable-hang-monitor --renderer-process-limit=2 \
       --disable-features=site-per-process,IsolateOrigins,Translate,MediaRouter,BackForwardCache,OptimizationHints \
       --js-flags=--max-old-space-size=192 --mute-audio \
       --disable-background-networking --disable-component-update --disable-sync --disable-extensions \
