@@ -9,16 +9,19 @@ export HOME=/home/browser
 SCREEN="${SCREEN:-1280x720x16}"            # 16-bit colour: less RAM and less VNC traffic
 START_URL="${START_URL:-about:blank}"
 ENABLE_COCKROACH="${ENABLE_COCKROACH:-0}"  # 1 = also run cockroach daemon + MCP (~+300MB)
+export ENABLE_COCKROACH START_URL SCREEN
+export LOG_DIR=/tmp/logs; mkdir -p "$LOG_DIR"   # per-process logs, read by diag.js (/diag endpoint + [diag] lines)
 TOKEN_FILE="$HOME/.cockroach-browser/auth-token"
 # NOTE: the package does nothing when started through its bin symlink, so always run it via node + real path
 export COCKROACH_CLI="${COCKROACH_CLI:-$(npm root -g)/cockroach-browser/dist/cli.js}"
 export COCKROACH_TOKEN_FILE="$TOKEN_FILE"
 
 log() { echo "[start] $*"; }
-run() { local name="$1"; shift; ( "$@" 2>&1 | sed -u "s/^/[$name] /" ) & }
+run() { local name="$1"; shift; ( "$@" 2>&1 | tee -a "$LOG_DIR/$name.log" | sed -u "s/^/[$name] /" ) & }
 mem_limit() { cat /sys/fs/cgroup/memory.max 2>/dev/null || cat /sys/fs/cgroup/memory/memory.limit_in_bytes 2>/dev/null || echo unknown; }
 mem_used()  { cat /sys/fs/cgroup/memory.current 2>/dev/null || cat /sys/fs/cgroup/memory/memory.usage_in_bytes 2>/dev/null || echo unknown; }
 
+log "ENABLE_COCKROACH=$ENABLE_COCKROACH cli=$COCKROACH_CLI exists=$([ -f "$COCKROACH_CLI" ] && echo yes || echo NO)"
 log "PORT=$PORT cpus=$(nproc) memory_limit_bytes=$(mem_limit)"
 
 # ---- secrets. Login for the desktop page: user "admin" (or $BASIC_USER) + $VNC_PASSWORD (any length)
@@ -34,7 +37,7 @@ node --max-old-space-size=48 /home/browser/proxy.js &
 PROXY_PID=$!
 
 # ---- 2. virtual display (no window manager: one Chromium window fills the screen)
-Xvfb :99 -screen 0 "$SCREEN" -nolisten tcp -noreset -ac 2>&1 | sed -u 's/^/[xvfb] /' &
+run xvfb Xvfb :99 -screen 0 "$SCREEN" -nolisten tcp -noreset -ac
 for i in $(seq 1 30); do [ -S /tmp/.X11-unix/X99 ] && break; sleep 0.5; done
 [ -S /tmp/.X11-unix/X99 ] && log "X display ready" || log "ERROR: Xvfb did not start"
 
@@ -57,7 +60,7 @@ mkdir -p /tmp/chromium-data /tmp/chromium-cache
       --disable-background-networking --disable-component-update --disable-sync --disable-extensions \
       --user-data-dir=/tmp/chromium-data --disk-cache-dir=/tmp/chromium-cache --disk-cache-size=33554432 \
       --window-position=0,0 --window-size=1280,720 \
-      "$START_URL" 2>&1 | grep --line-buffered -v -i 'dbus\|gcm\|fontconfig\|zygote_host\|nss_util\|vkCreateInstance\|CheckVkSuccess\|dawn' | sed -u 's/^/[chromium] /'
+      "$START_URL" 2>&1 | tee -a "$LOG_DIR/chromium.log" | grep --line-buffered -v -i 'dbus\|gcm\|fontconfig\|zygote_host\|nss_util\|vkCreateInstance\|CheckVkSuccess\|dawn' | sed -u 's/^/[chromium] /'
     log "chromium exited, restarting in 3s"; sleep 3
   done
 ) &
@@ -77,7 +80,12 @@ if [ "$ENABLE_COCKROACH" = "1" ]; then
   unset NODE_OPTIONS
 fi
 
-# ---- 7. memory heartbeat (every 5 min, quiet)
+# ---- 7. deep diagnostics: full report in this log ~60s and ~300s after boot (also live at /diag)
+( sleep 60; node /home/browser/diag.js 2>&1 | sed -u 's/^/[diag] /'; sleep 240; node /home/browser/diag.js 2>&1 | sed -u 's/^/[diag] /' ) &
+# keep per-process log files small (truncate in place, processes keep appending)
+( while true; do sleep 300; for f in "$LOG_DIR"/*.log; do [ -f "$f" ] && [ "$(stat -c %s "$f")" -gt 1048576 ] && { tail -c 262144 "$f" > "$f.tmp"; cat "$f.tmp" > "$f"; rm -f "$f.tmp"; }; done; done ) &
+
+# ---- 8. memory heartbeat (every 5 min, quiet)
 ( while true; do sleep 300; log "memory used=$(mem_used) limit=$(mem_limit)"; done ) &
 
 log "all started; gateway pid $PROXY_PID"
