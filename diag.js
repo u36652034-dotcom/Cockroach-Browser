@@ -150,6 +150,10 @@ async function report() {
   add(`PORT=${env.PORT} DISPLAY=${env.DISPLAY} NODE_OPTIONS=${env.NODE_OPTIONS || '(none)'} MALLOC_ARENA_MAX=${env.MALLOC_ARENA_MAX || '(unset)'}`);
   add(`COCKROACH_CLI=${CLI}`);
   add(`CHROMIUM_PATH=${env.CHROMIUM_PATH || '(unset)'}`);
+  const sh8 = (s) => require('crypto').createHash('sha256').update(String(s)).digest('hex').slice(0, 8);
+  add(`MCP_API_KEY sha256[:8]=${env.MCP_API_KEY ? sh8(env.MCP_API_KEY) : '-'}   VNC_PASSWORD sha256[:8]=${env.VNC_PASSWORD ? sh8(env.VNC_PASSWORD) : '-'}   (compare: printf %s 'yourkey' | sha256sum | cut -c1-8)`);
+  const stray = Object.keys(env).filter((k) => k.startsWith('COCKROACH_BROWSER_'));
+  add(`stray COCKROACH_BROWSER_* env vars: ${stray.join(', ') || '(none)'}`);
   add(`VNC_PASSWORD set=${Boolean(env.VNC_PASSWORD)} (len ${(env.VNC_PASSWORD || '').length}), MCP_API_KEY set=${Boolean(env.MCP_API_KEY)} (len ${(env.MCP_API_KEY || '').length})`);
 
   H('MEMORY / CPU (cgroup = what hostless enforces)');
@@ -233,7 +237,13 @@ async function report() {
   if (cg.events && cg.events.oom_kill > 0) findings.push(`OUT OF MEMORY: the kernel has killed ${cg.events.oom_kill} process(es) in this container. See PROCESSES for what is using RAM.`);
   if (Number.isFinite(+cg.memCur) && Number.isFinite(+cg.memMax) && +cg.memCur > 0.85 * +cg.memMax) findings.push(`Memory is above 85% of the limit (${mb(cg.memCur)} of ${mb(cg.memMax)}).`);
   if (cg.cpu.nr_periods > 100 && cg.cpu.nr_throttled / cg.cpu.nr_periods > 0.3) findings.push(`CPU is being throttled in ${Math.round(100 * cg.cpu.nr_throttled / cg.cpu.nr_periods)}% of periods (0.5 vCPU limit). Things will be slow, not broken.`);
-  Object.entries(writes).forEach(([d2, r]) => { if (r !== 'OK') findings.push(`Cannot create folders/files in ${d2} (${r}). Anything that needs to write there will crash.`); });
+  Object.entries(writes).forEach(([d2, r]) => {
+    if (r === 'OK') return;
+    const expected = d2.startsWith(HOME);
+    findings.push(expected ? `${d2} is not writable (${r.split(':')[0]}). Expected on hostless: all data is kept under /tmp, so this is informational.` : `Cannot create folders/files in ${d2} (${r}). Anything that needs to write there will crash.`);
+  });
+  const strayVars = Object.keys(env).filter((k) => k.startsWith('COCKROACH_BROWSER_'));
+  if (strayVars.length) findings.push(`Hosting env has ${strayVars.join(', ')}. The cockroach CLI prefers these over the token file; the gateway now ignores them for API calls, but delete them from the hostless env settings.`);
   if (!fs.existsSync('/tmp/.X11-unix/X99')) findings.push('Xvfb display :99 is missing, so nothing graphical can run. Check xvfb.log.');
   if (!vncUp) findings.push('x11vnc is not listening on 5900, so the desktop page cannot work. Check x11vnc.log.');
   if (!has(/chromium/)) findings.push('No chromium process is running (the restart loop in start.sh should bring it back; check chromium.log).');
