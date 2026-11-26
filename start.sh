@@ -23,6 +23,9 @@ log "PORT=$PORT cpus=$(nproc) memory_limit_bytes=$(mem_limit)"
 VNC_PASSWORD="${VNC_PASSWORD:-Osman@7878}"   # hardcoded default; a VNC_PASSWORD env var overrides it
 if [ -z "${MCP_API_KEY:-}" ];  then MCP_API_KEY="$(openssl rand -hex 16)"; log "generated MCP_API_KEY=$MCP_API_KEY (header: X-API-Key)"; fi
 export VNC_PASSWORD MCP_API_KEY
+# real chromium binary for API sessions (the daemon refuses symlinks)
+CHROMIUM_PATH="$(command -v chromium)"; [ -L "$CHROMIUM_PATH" ] && CHROMIUM_PATH="$(readlink -f "$CHROMIUM_PATH")"
+export CHROMIUM_PATH; log "chromium path for sessions: $CHROMIUM_PATH"
 
 # ---- 1. gateway first so the health check passes immediately
 node --max-old-space-size=48 /home/browser/proxy.js &
@@ -61,7 +64,7 @@ mkdir -p /tmp/chromium-data /tmp/chromium-cache
 if [ "$ENABLE_COCKROACH" = "1" ]; then
   export NODE_OPTIONS="--max-old-space-size=96"
   mkdir -p "$(dirname "$TOKEN_FILE")"
-  run cockroach cockroach-browser serve --host 127.0.0.1 --port 43110 --token-file "$TOKEN_FILE"
+  run cockroach cockroach-browser serve --host 127.0.0.1 --port 43110 --token-file "$TOKEN_FILE" --allow-session-host-config
   for i in $(seq 1 60); do [ -s "$TOKEN_FILE" ] && break; sleep 1; done
   if [ -s "$TOKEN_FILE" ]; then
     run mcp env COCKROACH_BROWSER_URL=http://127.0.0.1:43110 COCKROACH_BROWSER_TOKEN="$(tr -d '\n' < "$TOKEN_FILE")" \
