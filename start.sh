@@ -11,7 +11,9 @@ START_URL="${START_URL:-about:blank}"
 ENABLE_COCKROACH="${ENABLE_COCKROACH:-0}"  # 1 = also run cockroach daemon + MCP (~+300MB)
 export ENABLE_COCKROACH START_URL SCREEN
 export LOG_DIR=/tmp/logs; mkdir -p "$LOG_DIR"   # per-process logs, read by diag.js (/diag endpoint + [diag] lines)
-TOKEN_FILE="$HOME/.cockroach-browser/auth-token"
+# /home/browser is not writable for new subfolders on hostless (mkdir ENOENT), /tmp is
+export COCKROACH_ROOT=/tmp/cockroach
+TOKEN_FILE="$COCKROACH_ROOT/auth-token"
 # NOTE: the package does nothing when started through its bin symlink, so always run it via node + real path
 export COCKROACH_CLI="${COCKROACH_CLI:-$(npm root -g)/cockroach-browser/dist/cli.js}"
 export COCKROACH_TOKEN_FILE="$TOKEN_FILE"
@@ -60,7 +62,7 @@ mkdir -p /tmp/chromium-data /tmp/chromium-cache
       --disable-background-networking --disable-component-update --disable-sync --disable-extensions \
       --user-data-dir=/tmp/chromium-data --disk-cache-dir=/tmp/chromium-cache --disk-cache-size=33554432 \
       --window-position=0,0 --window-size=1280,720 \
-      "$START_URL" 2>&1 | tee -a "$LOG_DIR/chromium.log" | grep --line-buffered -v -i 'dbus\|gcm\|fontconfig\|zygote_host\|nss_util\|vkCreateInstance\|CheckVkSuccess\|dawn' | sed -u 's/^/[chromium] /'
+      "$START_URL" 2>&1 | grep --line-buffered -v -i 'dbus\|gcm\|fontconfig\|zygote_host\|nss_util\|vkCreateInstance\|CheckVkSuccess\|dawn' | tee -a "$LOG_DIR/chromium.log" | sed -u 's/^/[chromium] /'
     log "chromium exited, restarting in 3s"; sleep 3
   done
 ) &
@@ -68,8 +70,8 @@ mkdir -p /tmp/chromium-data /tmp/chromium-cache
 # ---- 6. optional cockroach daemon (loopback only) + MCP, heap-capped
 if [ "$ENABLE_COCKROACH" = "1" ]; then
   export NODE_OPTIONS="--max-old-space-size=96"
-  mkdir -p "$(dirname "$TOKEN_FILE")"
-  run cockroach node "$COCKROACH_CLI" serve --host 127.0.0.1 --port 43110 --token-file "$TOKEN_FILE" --allow-session-host-config
+  mkdir -p "$COCKROACH_ROOT"
+  run cockroach node "$COCKROACH_CLI" serve --host 127.0.0.1 --port 43110 --root "$COCKROACH_ROOT" --token-file "$TOKEN_FILE" --allow-session-host-config
   for i in $(seq 1 60); do [ -s "$TOKEN_FILE" ] && break; sleep 1; done
   if [ -s "$TOKEN_FILE" ]; then
     run mcp env COCKROACH_BROWSER_URL=http://127.0.0.1:43110 COCKROACH_BROWSER_TOKEN="$(tr -d '\n' < "$TOKEN_FILE")" \
