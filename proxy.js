@@ -20,7 +20,7 @@ const { execFile } = require('child_process');
 const httpProxy = require('http-proxy');
 const { WebSocketServer } = require('ws');
 
-const VERSION = 5;
+const VERSION = 6;
 const PORT = parseInt(process.env.PORT || '8000', 10);
 const VNC_PORT = 5900;
 const NOVNC_ROOT = path.resolve(process.env.NOVNC_ROOT || '/usr/share/novnc');
@@ -28,6 +28,7 @@ const MCP = 'http://127.0.0.1:43111';
 const MCP_WS = 'ws://127.0.0.1:43111';
 const API_KEY = process.env.MCP_API_KEY || '';
 const PASSWORD = process.env.VNC_PASSWORD || '';
+const COCKROACH_CLI = process.env.COCKROACH_CLI || '/usr/local/lib/node_modules/cockroach-browser/dist/cli.js';
 const COCKROACH_URL = process.env.COCKROACH_BROWSER_URL || 'http://127.0.0.1:43110';
 const TOKEN_FILE =
   process.env.COCKROACH_TOKEN_FILE || path.join(os.homedir(), '.cockroach-browser', 'auth-token');
@@ -80,7 +81,7 @@ function readBody(req, limit = 64 * 1024) {
   });
 }
 function cli(args, cb) {
-  execFile('cockroach-browser', [...args, '--url', COCKROACH_URL, '--token-file', TOKEN_FILE],
+  execFile('node', [COCKROACH_CLI, ...args, '--url', COCKROACH_URL, '--token-file', TOKEN_FILE],
     { timeout: 60000, maxBuffer: 4 * 1024 * 1024 }, cb);
 }
 
