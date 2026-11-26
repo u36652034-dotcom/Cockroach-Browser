@@ -15,7 +15,7 @@ ENV NODE_PATH=/usr/local/lib/node_modules \
 
 # 3. Non-root user + writable dirs
 RUN useradd -m -s /bin/bash browser \
-    && mkdir -p /tmp/.chromium /home/browser/.cockroach-browser \
+    && mkdir -p /tmp/.chromium /home/browser/.cockroach-browser /home/browser/.local/share/pki/nssdb \
     && chown -R browser:browser /tmp/.chromium /home/browser
 USER browser
 WORKDIR /home/browser
