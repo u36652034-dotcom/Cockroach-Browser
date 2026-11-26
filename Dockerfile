@@ -22,7 +22,7 @@ RUN useradd -m -s /bin/bash browser \
 USER browser
 WORKDIR /home/browser
 
-COPY --chown=browser:browser start.sh proxy.js /home/browser/
+COPY --chown=browser:browser start.sh proxy.js diag.js /home/browser/
 RUN chmod +x /home/browser/start.sh
 
 EXPOSE 8000
