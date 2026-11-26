@@ -45,14 +45,14 @@ mkdir -p /tmp/chromium-data /tmp/chromium-cache
   while true; do
     chromium \
       --no-sandbox --test-type --no-first-run --no-default-browser-check --disable-crash-reporter \
-      --disable-gpu --disable-software-rasterizer --disable-dev-shm-usage \
+      --disable-gpu --disable-vulkan --disable-software-rasterizer --disable-dev-shm-usage \
       --enable-low-end-device-mode --renderer-process-limit=2 \
       --disable-features=site-per-process,IsolateOrigins,Translate,MediaRouter,BackForwardCache,OptimizationHints \
       --js-flags=--max-old-space-size=192 --mute-audio \
       --disable-background-networking --disable-component-update --disable-sync --disable-extensions \
       --user-data-dir=/tmp/chromium-data --disk-cache-dir=/tmp/chromium-cache --disk-cache-size=33554432 \
       --window-position=0,0 --window-size=1280,720 \
-      "$START_URL" 2>&1 | grep --line-buffered -v -i 'dbus\|gcm\|fontconfig' | sed -u 's/^/[chromium] /'
+      "$START_URL" 2>&1 | grep --line-buffered -v -i 'dbus\|gcm\|fontconfig\|zygote_host\|nss_util\|vkCreateInstance\|CheckVkSuccess\|dawn' | sed -u 's/^/[chromium] /'
     log "chromium exited, restarting in 3s"; sleep 3
   done
 ) &
